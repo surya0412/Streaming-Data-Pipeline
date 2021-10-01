@@ -10,3 +10,5 @@
 
 # Common credential files
 **/credentials.json
+
+*/config/service-account-key.json
