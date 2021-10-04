@@ -33,7 +33,7 @@ MAX_NUMBER_ITEMS_IN_ORDER = 5
 MAX_ADDONS = 3
 
 # gcp config
-project = "qwiklabs-gcp-02-f7de14855a28"
+project = "qwiklabs-gcp-03-2ba6cfae58ed"
 TOPIC = 'OrderTopic' 
 
 # Creating a Faker instance and seeding to have the same results every time we execute the script
