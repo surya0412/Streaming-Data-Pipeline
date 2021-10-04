@@ -23,7 +23,7 @@ class FoodProviders(BaseProvider):
         return food_item_names[random.randint(0, len(food_item_names)-1)]
 
     def Indian_Names(self):
-        with open("C:/ApacheBeam/Stream/Indian_Name.txt", "r") as f:
+        with open("C:/ApacheBeam/Streaming-Data-Pipeline/config/Indian_Names.txt", "r") as f:
             content = f.read()
         Names_list = content.split(',')
         return Names_list[random.randint(0, len(Names_list)-1)]

@@ -26,14 +26,14 @@ from apache_beam.dataframe.io import _DelimSplitter, read_csv
 import os
 import _thread
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"]="C:/ApacheBeam/Stream/service-account-key.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"]="C:/ApacheBeam/Streaming-Data-Pipeline/config/service-account-key.json"
 
 # fake data config
 MAX_NUMBER_ITEMS_IN_ORDER = 5
 MAX_ADDONS = 3
 
 # gcp config
-project = "qwiklabs-gcp-00-54aaa138a689"
+project = "qwiklabs-gcp-02-f7de14855a28"
 TOPIC = 'OrderTopic' 
 
 # Creating a Faker instance and seeding to have the same results every time we execute the script
@@ -96,12 +96,12 @@ if __name__ == "__main__":
     
     i = 1
     # while True:
-    while True:
+    while i<20:
         # message, key = _thread.start_new_thread(make_order(i), ())
         # message, key = _thread.start_new_thread(make_order(i), ())
         message, key = make_order(i)
-        if i%10 == 0:
-            time.sleep(125)
+        if i%2 == 0:
+            time.sleep(15)
         data = str(json.dumps(message))
         data = data.encode('utf-8')
         publisher.publish("projects/{project}/topics/{topic_name}".format(project=project, topic_name=TOPIC), data=data)
