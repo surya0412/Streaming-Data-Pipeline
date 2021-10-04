@@ -1,4 +1,1 @@
 {"id": "1", "shop": "Salma", "name": " sukesh", "phoneNumber": "vv", "address": "0353 Combs Ford Ap"}
-
-
-{"fields": [{"default": null, "type": ["null", {"logicalType": "varchar", "type": "string", "maxLength": 100}], "name": "shop"}, {"default": null, "type": ["null", {"logicalType": "varchar", "type": "string", "maxLength": 50}], "name": "count"}], "type": "record", "name": "baseRecord"}
