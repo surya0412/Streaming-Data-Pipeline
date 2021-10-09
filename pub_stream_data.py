@@ -33,7 +33,7 @@ MAX_NUMBER_ITEMS_IN_ORDER = 5
 MAX_ADDONS = 3
 
 # gcp config
-project = "qwiklabs-gcp-03-2ba6cfae58ed"
+project = "qwiklabs-gcp-02-6f0b89dc7654"
 TOPIC = 'OrderTopic' 
 
 # Creating a Faker instance and seeding to have the same results every time we execute the script
@@ -95,15 +95,15 @@ if __name__ == "__main__":
         publisher.create_topic(event_type)
     
     i = 1
-    # while True:
-    while i<20:
+    while True:
+    # while i<20:
         # message, key = _thread.start_new_thread(make_order(i), ())
         # message, key = _thread.start_new_thread(make_order(i), ())
         message, key = make_order(i)
         if i%2 == 0:
-            time.sleep(15)
+            time.sleep(5)
         data = str(json.dumps(message))
         data = data.encode('utf-8')
         publisher.publish("projects/{project}/topics/{topic_name}".format(project=project, topic_name=TOPIC), data=data)
-        print(message)
+        # print(message)
         i +=1

@@ -11,7 +11,7 @@ from foodProvider import FoodProviders
 import sys
 import ast
 import re
-import datetime;
+
   
 # from google.cloud import 
 from google.cloud import pubsub_v1
@@ -24,7 +24,7 @@ from apache_beam.io.gcp.internal.clients import bigquery
 from apache_beam.transforms.sql import SqlTransform
 import apache_beam as beam
 from apache_beam import window
-from apache_beam.io import ReadFromText
+from apache_beam.io import gcsio
 from apache_beam.io import WriteToAvro
 from apache_beam.io.gcp.pubsub import pubsub   
 from apache_beam.options.pipeline_options import PipelineOptions
@@ -34,12 +34,32 @@ from apache_beam.dataframe.convert import to_pcollection
 from apache_beam.dataframe.io import _DelimSplitter, read_csv
 from apache_beam.io.gcp.bigtableio import WriteToBigTable
 
+from apache_beam.io.gcp.gcsfilesystem import GCSFileSystem as GFS
+from apache_beam.io.fileio import FileSink
+from apache_beam.io.fileio import WriteToFiles
+import fastavro
 
 import os
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"]="C:/ApacheBeam/Streaming-Data-Pipeline/config/service-account-key.json"
-project = "qwiklabs-gcp-03-2ba6cfae58ed"
+project = "qwiklabs-gcp-02-6f0b89dc7654"
+gfs = GFS('gs://qwiklabs-gcp-02-6f0b89dc7654/tmp.')
 
+class AvroFileSink(FileSink):
+  def __init__(self, schema, codec='deflate'):
+      self._schema = schema
+      self._codec = codec
+
+  def open(self, fh):
+      # This is called on every new bundle.
+      self.writer = fastavro.write.Writer(fh, self._schema, self._codec)
+
+  def write(self, record):
+      # This is called on every element.
+      self.writer.write(record)
+
+  def flush(self):
+      self.writer.flush()
 
 class get_req_col(beam.DoFn):
   """Parse each line of input text into words."""
@@ -83,7 +103,12 @@ class transform(beam.DoFn):
     
     yield dictdata
 
+class DeleteEmpty(beam.DoFn):
+  def __init__(self, gfs):
+    self.gfs = gfs
 
+  def process(self, file_metadata):
+    gfs.delete(file_metadata)
 
 def run(argv=None, save_main_session=True):
   """Main entry point; defines and runs the our pipeline."""
@@ -101,21 +126,25 @@ def run(argv=None, save_main_session=True):
   parser.add_argument(
       '--output_avro_file',
       dest='output_avro_file',
-      default='C:/ApacheBeam/Streaming-Data-Pipeline/config/output.avro',
+      default='C:/ApacheBeam/Streaming-Data-Pipeline/config/',
       help='Subscriber name for that topic')
   known_args, pipeline_args = parser.parse_known_args(argv)
   
   pipeline_options = PipelineOptions(pipeline_args,streaming=True, save_main_session=True)
 
-
   def sumall(message):
     shop_name, id = message
-    return (shop_name, len(id)) 
+    import datetime
+    return {"Restaurant":shop_name, "orders_in_last_one_hour":len(id), "load_timestamp":str(datetime.datetime.now())}
+
+  # def sumall(message):
+  #   shop_name, id = message
+  #   return (shop_name, len(id)) 
 
   def dict_format(message):
     shop,id = message
     return {'shop':shop, 'count':id}
-
+  
   with beam.Pipeline(options=pipeline_options) as p:
 
     subscriber = pubsub_v1.SubscriberClient()
@@ -125,44 +154,60 @@ def run(argv=None, save_main_session=True):
     pubsub_messages = (p | 'Read' >> beam.io.ReadFromPubSub(topic="projects/{project}/topics/OrderTopic".format(project=project))
                          | 'Decode the Pub/Sub Message' >> (beam.ParDo(decode()))
                          | 'perform transformations' >> (beam.ParDo(transform())))
-    print(str(datetime.datetime.now()))
+    # print(str(datetime.datetime.now()))
 
-    avro_schema = {
+    avro_schema = schema = fastavro.schema.parse_schema({
     "name": "bqtable",
     "type": "record",
     "fields": [
         {"name": "shop", "type": "string"},
         {"name": "count", "type": ["null", "int"]},
     ]
-}
- 
-    running_amount_averages = (
-         pubsub_messages 
-        #  | 'print time' >> beam.Map(print(str(datetime.datetime.now())))
-                         | 'window' >> beam.WindowInto(window.SlidingWindows(60, 30),accumulation_mode="ACCUMULATING")
+})
+    sliding_window_table_schema = bigquery.TableSchema()
+      # shop
+    shop_schema = bigquery.TableFieldSchema()
+    shop_schema.name = 'Restaurant'
+    shop_schema.type = 'STRING'
+    shop_schema.mode = 'NULLABLE'
+    sliding_window_table_schema.fields.append(shop_schema)
+
+      # name
+    count_schema = bigquery.TableFieldSchema()
+    count_schema.name = 'orders_in_last_one_hour'
+    count_schema.type = 'STRING'
+    count_schema.mode = 'NULLABLE'
+    sliding_window_table_schema.fields.append(count_schema)
+
+      # load timestamp
+    time_schema = bigquery.TableFieldSchema()
+    time_schema.name = 'load_timestamp'
+    time_schema.type = 'DATETIME'
+    time_schema.mode = 'NULLABLE'
+    sliding_window_table_schema.fields.append(time_schema)
+
+    table_id = 'sliding_window_table'
+    dataset_id = 'mydataset'
+    running_amount_averages = (                                         #seconds * minutes
+         pubsub_messages | 'window' >> beam.WindowInto(window.SlidingWindows(60*2, 10),accumulation_mode="ACCUMULATING")
                          | 'filter column' >> (beam.ParDo(get_req_col()))
                          | 'Calculate Average Price and restaurant' >> (beam.GroupByKey())
                          | 'get the count' >> (beam.Map(sumall))
-                        #  | 'print time' >> beam.Map(lambda x:str(datetime.datetime.now()))
-                        # | 'print the count' >> (beam.Map(print))
-                        #  | 'add timestamp' >> (beam.Map(lambda x:str(datetime.datetime.now())))
-                        #  | 'print' >> beam.Map()))
-                         | 'dict format for avro' >> (beam.Map(dict_format))
-                         | 'Write to Avro' >> WriteToAvro(known_args.output_avro_file,schema=avro_schema, file_name_suffix='.avro'))
-
-    # print(str(datetime.datetime.now()))
-
-              #  | 'Print' >> (beam.Map(print)))
-    # print("something")
-              #  | 'JSON row to dict' >> beam.ParDo(transform())
-              #  | 'Filter Data' >> (beam.Map(process)))
-    # transforming = (lines | (beam.Map(process)))
-                        #   | 'Group' >> (beam.GroupByKey())
-                        #   | 'sum' >> (beam.Map(sum_all))
-                        #   | 'Largest 5 values' >> beam.combiners.Top.Largest(5))
-    # (transforming 
-    # | 'Write in Format' >> beam.MapTuple(write_format)
-    #              |WriteToText(known_args.output))
+                         | 'write to bq sliding window Table' >> beam.io.WriteToBigQuery(
+                                            table = table_id,
+                                            dataset=dataset_id,
+                                            project=project,
+                                            schema=sliding_window_table_schema,
+                                            with_auto_sharding=True,
+                                            method='STREAMING_INSERTS',
+                                            write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
+                                            create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED))
+                        #  | 'dict format for avro' >> (beam.Map(dict_format)))
+                        #  | 'Filenames' >> beam.Map(gfs.delete(paths='gs://qwiklabs-gcp-04-7494af2d8d63/s.avro')))
+                        #  | 'Reshuffle' >> beam.Reshuffle()
+                        #  | 'delete prev files' >> (beam.ParDo(DeleteEmpty(GFS)))
+                        #  | 'Write to Avro' >> WriteToAvro(known_args.output_avro_file,schema=avro_schema, file_name_suffix='.avro'))
+                        #  | 'write to avro' >> WriteToFiles(path='gs://qwiklabs-gcp-04-7494af2d8d63/tmp.', sink=sink))
 
     # CREATE TABLE `qwiklabs-gcp-03-b60faab5f29e.mydataset.mytable`
     # (
@@ -253,9 +298,9 @@ def run(argv=None, save_main_session=True):
     dataset_id = 'mydataset'
 
     # print(table_schema)
-    pubsub_messages | beam.Map(print)
+    # pubsub_messages | beam.Map(print)
 
-    pubsub_messages | beam.io.WriteToBigQuery(
+    pubsub_messages | 'write to bq streamTable' >> beam.io.WriteToBigQuery(
     table = table_id,
     dataset=dataset_id,
     project=project,
@@ -266,32 +311,6 @@ def run(argv=None, save_main_session=True):
     create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED)
 
 
-    # sliding_window_table_schema = bigquery.TableSchema()
-    #   # shop
-    # shop_schema = bigquery.TableFieldSchema()
-    # shop_schema.name = 'shop'
-    # shop_schema.type = 'STRING'
-    # shop_schema.mode = 'NULLABLE'
-    # sliding_window_table_schema.fields.append(shop_schema)
-
-    #   # name
-    # count_schema = bigquery.TableFieldSchema()
-    # count_schema.name = 'orders_in_last_one_hour'
-    # count_schema.type = 'STRING'
-    # count_schema.mode = 'NULLABLE'
-    # sliding_window_table_schema.fields.append(count_schema)
-
-
-    # table_id = 'sliding_window_table'
-    # pubsub_messages | beam.io.WriteToBigQuery(
-    # table = table_id,
-    # dataset=dataset_id,
-    # project=project,
-    # schema=sliding_window_table_schema,
-    # with_auto_sharding=True,
-    # method='STREAMING_INSERTS',
-    # write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
-    # create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED)
 
 
 
